@@ -1,9 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+
     <title>BotatAI</title>
-    <link rel="stylesheet" href="style.css">
+    <meta content="" name="description">
+    <meta content="" name="keywords">
+
+    <link href="./style.css" rel="stylesheet">
+    <!-- <script src="./jquery-3.6.0.min.js"></script> -->
 </head>
 <body>
     <div class="main-wrapper">
@@ -12,17 +19,18 @@
             <div class="input-area">
                 <div class="text-area">
                     <div class="text-content" contenteditable="true"></div>
-                    <div class="placeholder">Send a message...</div>
+                    <div class="placeholder">Type something...</div>
                 </div>
-                <button id="sendBtn">➤</button>
+                <button class="send-button">➤</button>
             </div>
+            <button class="dark-mode-btn">!</button>
         </div>
         <div class="chat-box">
             <div class="chat-content"></div>
         </div>
-    </div>    
+    </div>
 
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="script.js"></script>
+    <script type="module" src="script.js"></script>
 </body>
 </html>

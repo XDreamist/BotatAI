@@ -1,6 +1,21 @@
-$(document).ready(function () {
+$(document).ready(function () { 
+    const $mainHeader  = $('.main-header');
+    const $chatContent = $('.chat-content');
     const $textContent = $('.text-content');
     const $placeholder = $('.placeholder');
+    const $sendButton  = $('.send-button');
+    const $darkModeBtn = $('.dark-mode-btn');
+
+    var models = [];
+    var currentModel = "";
+
+    function changeTheme() {
+        document.body.dataset.theme = document.body.dataset.theme === 'dark' ? '' : 'dark';
+    }
+
+    function changeModel(modelIdx) {
+        currentModel = models[modelIdx];
+    }
 
     function togglePlaceholder() {
         const text = $textContent.text().trim();
@@ -11,34 +26,61 @@ $(document).ready(function () {
         }
     }
 
-    $textContent.on('input', togglePlaceholder);
-    togglePlaceholder();
+    function isValidText(text) {
+        if (text.length <= 0) {
+            alert("Type something..");
+            return false;
+        }
+        if (text.length > 1000) {
+            alert("Character limit exceeded!");
+            return false;
+        }
+        return true;
+    }
+
+    function getModels() {
+        $.ajax({
+            url: 'http://localhost:11434/api/tags',
+            method: 'GET',
+            success: function (data) {
+                models = data.models;
+                currentModel = models[0].model;
+                for (modelIdx in models) {
+                    var model = models[modelIdx];
+                    console.log(model);
+                }
+            },
+            error: function (xhr, status, error) {
+                console.error('Error: ' + xhr);
+            }
+        });
+    }
 
     function appendMessage(text, sender) {
         const messageClass = sender === 'user' ? 'user' : 'ai';
-        $('.chat-content').append(`
+        $chatContent.append(`
             <div class="message ${messageClass}">
-                <div class="bubble">${text}</div>
+                <p class="bubble">${text}</p>
             </div>
         `);
-        $('.chat-content').scrollTop($('.chat-content')[0].scrollHeight);
+        $chatContent.scrollTop($chatContent[0].scrollHeight);
     }
 
     function sendMessage() {
-        const text = $('.text-content').text().trim();
+        const text = $textContent.text().trim();
+        if (!isValidText(text)) return;
+        
         console.log('Sending message:', text);
-        if (!text) return;
-
         appendMessage(text, 'user');
 
         const requestData = {
-            model: "deepseek-r1:1.5b",
+            model: currentModel,
             prompt: `[INST]${text}[/INST]`,
             stream: false
         };
 
         $.ajax({
-            url: 'http://192.168.1.35:11434/api/generate',
+            url: 'http://localhost:11434/api/generate',
             method: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(requestData),
@@ -52,15 +94,25 @@ $(document).ready(function () {
             }
         });
 
-        $('.text-content').text('');
+        $textContent.text('');
         togglePlaceholder();
     }
 
-    $('#sendBtn').on('click', sendMessage);
-    $('.text-content').on('keypress', function (e) {
+
+    // -------------------------------
+    // ----- Main execution flow -----
+    // -------------------------------
+    getModels();
+    togglePlaceholder();
+    $mainHeader.on('click', changeModel);
+    $textContent.on('input', togglePlaceholder);
+    $sendButton.on('click', sendMessage);
+    $textContent.on('keypress', function (e) {
+        // Enter key is 13
         if (e.which === 13 && !e.shiftKey) {
             e.preventDefault();
             sendMessage();
         }
     });
+    $darkModeBtn.on('click', changeTheme);
 });
