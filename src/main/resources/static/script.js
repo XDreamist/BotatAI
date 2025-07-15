@@ -6,6 +6,35 @@ $(document).ready(function () {
     const $sendButton  = $('.send-button');
     const $darkModeBtn = $('.dark-mode-btn');
 
+    const $modelHeader = $('.model-header');
+    const $modelMenu = $('.model-menu');
+
+    // let currentModel = 'mistral';
+
+    // Toggle model menu on header click
+    $modelHeader.on('click', function (e) {
+        e.stopPropagation();
+        $modelMenu.toggle();
+    });
+
+    // Update model on option click
+    $('.model-option').on('click', function () {
+        const selectedModel = $(this).text();
+        currentModel = selectedModel;
+        $modelHeader.text(selectedModel + ' ▼');
+        $modelMenu.hide();
+    });
+
+    // Hide menu when clicking outside
+    $(document).on('click', function () {
+        $modelMenu.hide();
+    });
+
+    // Export current model for use in your API calls
+    window.getCurrentModel = function () {
+        return currentModel;
+    };
+
     var models = [];
     var currentModel = "";
 
@@ -40,12 +69,12 @@ $(document).ready(function () {
 
     function getModels() {
         $.ajax({
-            url: 'http://localhost:11434/api/tags',
+            url: 'http://192.168.1.35:11434/api/tags',
             method: 'GET',
             success: function (data) {
                 models = data.models;
                 currentModel = models[0].model;
-                for (modelIdx in models) {
+                for (var modelIdx in models) {
                     var model = models[modelIdx];
                     console.log(model);
                 }
@@ -56,10 +85,12 @@ $(document).ready(function () {
         });
     }
 
-    function appendMessage(text, sender) {
+    function appendMessage(text, sender, id = '') {
         const messageClass = sender === 'user' ? 'user' : 'ai';
+        const idAttr = id ? `id="${id}"` : '';
+
         $chatContent.append(`
-            <div class="message ${messageClass}">
+            <div class="message ${messageClass}" ${idAttr}>
                 <p class="bubble">${text}</p>
             </div>
         `);
@@ -69,9 +100,12 @@ $(document).ready(function () {
     function sendMessage() {
         const text = $textContent.text().trim();
         if (!isValidText(text)) return;
-        
+
         console.log('Sending message:', text);
         appendMessage(text, 'user');
+
+        const loadingId = 'loading-' + Date.now();
+        appendMessage('<span class="thinking">Thinking...</span>', 'ai', loadingId);
 
         const requestData = {
             model: currentModel,
@@ -80,17 +114,19 @@ $(document).ready(function () {
         };
 
         $.ajax({
-            url: 'http://localhost:11434/api/generate',
+            url: 'http://192.168.1.35:11434/api/generate',
             method: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(requestData),
             success: function (data) {
                 const response = data.response || '(No response)';
                 console.log('Received response:', response);
-                appendMessage(response, 'ai');
+
+                // Replace the loading message with the actual response
+                $(`#${loadingId}`).html(response);
             },
             error: function (xhr, status, error) {
-                appendMessage('Error: ' + xhr.responseText, 'ai');
+                $(`#${loadingId}`).html('Error: ' + xhr.responseText);
             }
         });
 
