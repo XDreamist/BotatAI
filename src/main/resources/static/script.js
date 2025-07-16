@@ -1,49 +1,55 @@
 $(document).ready(function () { 
     const $mainHeader  = $('.main-header');
+    const $modelHeader = $('.model-header');
+    const $modelMenu   = $('.model-menu')
     const $chatContent = $('.chat-content');
     const $textContent = $('.text-content');
     const $placeholder = $('.placeholder');
     const $sendButton  = $('.send-button');
-    const $darkModeBtn = $('.dark-mode-btn');
 
-    const $modelHeader = $('.model-header');
-    const $modelMenu = $('.model-menu');
+    var models             = [];
+    var currentModelInfo   = "";
+    var isModelListVisible = false;
+    var isFadeAnimPlaying  = false;
+    var isProcessingPrompt = false;
+    var isStoppingprocess  = false;
 
-    // let currentModel = 'mistral';
-
-    // Toggle model menu on header click
-    $modelHeader.on('click', function (e) {
-        e.stopPropagation();
-        $modelMenu.toggle();
-    });
-
-    // Update model on option click
-    $('.model-option').on('click', function () {
-        const selectedModel = $(this).text();
-        currentModel = selectedModel;
-        $modelHeader.text(selectedModel + ' ▼');
-        $modelMenu.hide();
-    });
-
-    // Hide menu when clicking outside
-    $(document).on('click', function () {
-        $modelMenu.hide();
-    });
-
-    // Export current model for use in your API calls
-    window.getCurrentModel = function () {
-        return currentModel;
-    };
-
-    var models = [];
-    var currentModel = "";
-
-    function changeTheme() {
+    function toggleTheme() {
         document.body.dataset.theme = document.body.dataset.theme === 'dark' ? '' : 'dark';
     }
 
     function changeModel(modelIdx) {
-        currentModel = models[modelIdx];
+        currentModelInfo = models[modelIdx];
+    }
+
+    function hideModelMenu(shouldHide) {
+        if (isFadeAnimPlaying) return;
+        isFadeAnimPlaying = true;
+        if (isModelListVisible || shouldHide) {
+            $modelMenu.fadeOut(200, function() {
+                isModelListVisible = false;
+                isFadeAnimPlaying = false;
+            });
+        }
+        else {
+            $modelMenu.fadeIn(200, function() {
+                isModelListVisible = true;
+                isFadeAnimPlaying = false;
+            });
+        } 
+    }
+
+    function listModels() {
+        if (!models) {
+            appendMessage("No info found or models not loaded.", 'ai');
+            return;
+        }
+
+        var modelsInfo = "";
+        for (var modelIdx in models) {
+            modelsInfo += `${parseInt(modelIdx) + 1}. ${models[modelIdx].name}\n`;
+        }
+        appendMessage(modelsInfo, 'ai');
     }
 
     function togglePlaceholder() {
@@ -55,27 +61,30 @@ $(document).ready(function () {
         }
     }
 
-    function isValidText(text) {
-        if (text.length <= 0) {
+    function isValidPrompt(prompt) {
+        if (prompt.length <= 0) {
             alert("Type something..");
             return false;
         }
-        if (text.length > 1000) {
+        if (prompt.length > 1000) {
             alert("Character limit exceeded!");
             return false;
         }
         return true;
     }
 
-    function getModels() {
+    function updateModelsInfo() {
         $.ajax({
             url: 'http://192.168.1.35:11434/api/tags',
             method: 'GET',
             success: function (data) {
                 models = data.models;
-                currentModel = models[0].model;
+                currentModelInfo = models[0];
+                $modelHeader.append(`${currentModelInfo.name}` + ' ▼');
+
                 for (var modelIdx in models) {
                     var model = models[modelIdx];
+                    populateModelSelection(modelIdx, model.name);
                     console.log(model);
                 }
             },
@@ -85,70 +94,167 @@ $(document).ready(function () {
         });
     }
 
-    function appendMessage(text, sender, id = '') {
+    function populateModelSelection(modelIdx, model_name) {
+        $modelMenu.append(`<div class="model-option" id="${modelIdx}">${model_name}</div>`);
+        $('.model-option').on('click', function () {
+            currentModelInfo = models[$(this).attr('id')];
+            $modelHeader.text(currentModelInfo.name + ' ▼');
+            // $modelMenu.hide();
+            hideModelMenu(true);
+        });    
+    }
+
+    function appendMessage(text, sender) {
+        const messageClass = sender === 'user' ? 'user' : 'ai';
+        const messageDiv = document.createElement('div');
+        messageDiv.className="message "+ messageClass;
+        
+        const actualtext=document.createElement('p');
+        actualtext.className="bubble";
+        actualtext.textContent = text;
+        messageDiv.appendChild(actualtext);
+
+        document.querySelector('.chat-content').appendChild(messageDiv);
+               //$chatContent.append(`
+          //  <div class="message ${messageClass}">
+            //    <p class="bubble">${text}</p>
+            //</div>
+        //`);
+        $chatContent.scrollTop($chatContent[0].scrollHeight);
+    }
+
+    function appendLoading(text, sender, id = '') {
         const messageClass = sender === 'user' ? 'user' : 'ai';
         const idAttr = id ? `id="${id}"` : '';
 
         $chatContent.append(`
-            <div class="message ${messageClass}" ${idAttr}>
-                <p class="bubble">${text}</p>
+            <div class="message ${messageClass}">
+                <p class="bubble" ${idAttr}>${text}</p>
             </div>
         `);
         $chatContent.scrollTop($chatContent[0].scrollHeight);
     }
 
-    function sendMessage() {
-        const text = $textContent.text().trim();
-        if (!isValidText(text)) return;
+    function setProcessStoppable(stoppable) {
+        $sendButton.text(stoppable ? '■' : '➤');
+        $textContent.prop('contentEditable', !stoppable);
+        isProcessingPrompt = stoppable;
+    }
 
-        console.log('Sending message:', text);
-        appendMessage(text, 'user');
+    function stopProcessing() {
+        if (isStoppingprocess) return;
+        isStoppingprocess = true;
+        $.ajax({
+            url: 'http://192.168.1.35:11434/api/stop',
+            method: 'GET',
+            success: function (data) {
+                console.log(data);
+                isStoppingprocess = false;
+            },
+            error: function (xhr, status, error) {
+                console.error('Error: ' + xhr);
+                isStoppingprocess = false;
+            }
+        });
+    }
 
-        const loadingId = 'loading-' + Date.now();
-        appendMessage('<span class="thinking">Thinking...</span>', 'ai', loadingId);
+    function processText() {
+        if (isProcessingPrompt) return stopProcessing();
+
+        const textToProcess = $textContent.text().trim();
+        $textContent.text('');
+        togglePlaceholder();
+        if (textToProcess[0] != '/') {
+            sendPrompt(textToProcess);
+            return;
+        }
+        // Need to work on below code
+        const command = textToProcess.split('/:');
+        console.log(command);
+        switch(textToProcess) {
+            case "/list": {
+                listModels();
+                break;
+            }
+            case "/theme": {
+                toggleTheme();
+                break;
+            }
+            default: {
+                sendPrompt(textToProcess);
+                break;
+            }
+        }
+    }
+
+    function sendPrompt(prompt) {
+        if (!isValidPrompt(prompt)) return;
+        
+        console.log('Sending prompt:', prompt);
+        appendMessage(prompt, 'user');
+
+        const loadingBubbleId = 'loading-' + Date.now();
+        appendLoading('<span class="loading">...</span>', 'ai', loadingBubbleId);
 
         const requestData = {
-            model: currentModel,
-            prompt: `[INST]${text}[/INST]`,
+            model: getCurrentModel(),
+            prompt: `[INST]${prompt}[/INST]`,
             stream: false
         };
 
+        setProcessStoppable(true);
         $.ajax({
             url: 'http://192.168.1.35:11434/api/generate',
             method: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(requestData),
             success: function (data) {
-                const response = data.response || '(No response)';
+                const response = data.response.trim() || '(No response)';
                 console.log('Received response:', response);
 
-                // Replace the loading message with the actual response
-                $(`#${loadingId}`).html(response);
+                // appendMessage(response, 'ai');
+                $(`#${loadingBubbleId}`).html(response);
+
+                setProcessStoppable(false);
             },
             error: function (xhr, status, error) {
-                $(`#${loadingId}`).html('Error: ' + xhr.responseText);
+                // appendMessage('Error: ' + xhr.responseText, 'ai');
+                $(`#${loadingBubbleId}`).html('Error: ' + xhr.responseText);
+
+                setProcessStoppable(false);
             }
         });
-
-        $textContent.text('');
-        togglePlaceholder();
     }
 
 
     // -------------------------------
     // ----- Main execution flow -----
+    // ----- and event bindings ------
     // -------------------------------
-    getModels();
+    updateModelsInfo();
     togglePlaceholder();
     $mainHeader.on('click', changeModel);
     $textContent.on('input', togglePlaceholder);
-    $sendButton.on('click', sendMessage);
+    $sendButton.on('click', processText);
     $textContent.on('keypress', function (e) {
         // Enter key is 13
         if (e.which === 13 && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            processText();
         }
     });
-    $darkModeBtn.on('click', changeTheme);
+    $modelHeader.on('click', function (e) {
+        e.stopPropagation();
+        // $modelMenu.toggle();
+        hideModelMenu();
+    });
+    $(document).on('click', function () {
+        // $modelMenu.hide();
+        hideModelMenu(true);
+    });
+    window.getCurrentModel = function () {
+        return currentModelInfo?.model;
+    };
+
+    // $modelMenu.on('click', showModelList);
 });

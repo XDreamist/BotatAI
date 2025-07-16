@@ -1,0 +1,270 @@
+How to fix this
+Solution: Use stream: true + handle the stream manually
+
+Here’s how you can implement this properly:
+1️⃣ Send stream: true in your sendPrompt
+
+const requestData = {
+    model: getCurrentModel(),
+    prompt: `[INST]${prompt}[/INST]`,
+    stream: true
+};
+
+2️⃣ Use fetch() + ReadableStream for streaming
+
+Instead of $.ajax, do:
+
+const controller = new AbortController();
+const signal = controller.signal;
+
+setProcessStoppable(true);
+let finalResponse = '';
+
+fetch('http://192.168.1.35:11434/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestData),
+    signal: signal
+})
+.then(async response => {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+
+        // Ollama sends JSON per line (ndjson), handle each line
+        chunk.trim().split('\n').forEach(line => {
+            if (!line) return;
+            const json = JSON.parse(line);
+            if (json.done) return;
+
+            finalResponse += json.response;
+            $(`#${loadingBubbleId}`).html(finalResponse);
+        });
+    }
+
+    setProcessStoppable(false);
+})
+.catch(err => {
+    if (err.name === 'AbortError') {
+        console.log('Generation aborted by user.');
+        $(`#${loadingBubbleId}`).html('(Generation stopped)');
+    } else {
+        console.error('Error:', err);
+        $(`#${loadingBubbleId}`).html('Error: ' + err.message);
+    }
+    setProcessStoppable(false);
+});
+
+3️⃣ Stop the stream with AbortController
+
+Store controller globally:
+
+let currentAbortController = null;
+
+When starting:
+
+currentAbortController = controller;
+
+In stopProcessing():
+
+function stopProcessing() {
+    if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+    }
+}
+
+Summary:
+Your Current Setup	Required for /api/stop
+stream: false (atomic)	❌ Cannot stop mid-way
+stream: true + streaming	✅ Can stop properly
+Why this works
+
+    stream: true returns ndjson (newline-delimited JSON) from Ollama.
+
+    You read the ReadableStream chunk by chunk and update UI in real-time.
+
+    To stop, simply abort the fetch with AbortController (no need to call /api/stop explicitly, Ollama cancels automatically when the client disconnects).
+
+Final Answer:
+
+If you want real-time stop, switch to stream: true, use fetch() + AbortController, and remove the /api/stop call entirely.
+
+If you want, I can give you the full working version of your sendPrompt() with streaming. Want me to send that?
+You said:
+Yes send that
+ChatGPT said:
+
+Perfect!
+Here’s a full working version of sendPrompt() with streaming + stop support using AbortController.
+This will replace your current sendPrompt().
+Full Streaming sendPrompt() Function
+
+let currentAbortController = null;
+
+function sendPrompt(prompt) {
+    if (!isValidPrompt(prompt)) return;
+
+    console.log('Sending prompt:', prompt);
+    appendMessage(prompt, 'user');
+
+    const loadingBubbleId = 'loading-' + Date.now();
+    appendLoading('<span class="loading">...</span>', 'ai', loadingBubbleId);
+
+    const requestData = {
+        model: getCurrentModel(),
+        prompt: `[INST]${prompt}[/INST]`,
+        stream: true // << IMPORTANT
+    };
+
+    const controller = new AbortController();
+    currentAbortController = controller;
+    const signal = controller.signal;
+
+    setProcessStoppable(true);
+
+    fetch('http://192.168.1.35:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData),
+        signal: signal
+    })
+    .then(async response => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let finalResponse = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+
+            // Ollama sends NDJSON: multiple JSON objects per line
+            chunk.trim().split('\n').forEach(line => {
+                if (!line) return;
+
+                try {
+                    const json = JSON.parse(line);
+                    if (json.done) return; // Ollama stream end flag
+
+                    finalResponse += json.response;
+                    $(`#${loadingBubbleId}`).html(finalResponse);
+                } catch (err) {
+                    console.error('JSON parse error:', err);
+                }
+            });
+        }
+
+        setProcessStoppable(false);
+        currentAbortController = null;
+    })
+    .catch(err => {
+        if (err.name === 'AbortError') {
+            console.log('Generation stopped by user.');
+            $(`#${loadingBubbleId}`).html('(Generation stopped)');
+        } else {
+            console.error('Fetch error:', err);
+            $(`#${loadingBubbleId}`).html('Error: ' + err.message);
+        }
+
+        setProcessStoppable(false);
+        currentAbortController = null;
+    });
+}
+
+Update stopProcessing()
+
+function stopProcessing() {
+    if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+    }
+}
+
+How It Works
+Action	Behavior
+Press send	Starts streaming generation
+Press stop (■)	AbortController cancels the fetch
+Ollama behavior	Automatically stops when client aborts
+Advantages
+
+    No need to call /api/stop manually.
+
+    Real-time output with stream: true.
+
+    Clean cancel anytime via AbortController.
+
+
+
+
+
+
+
+///////////////////////////////////////////
+
+Here’s a JavaScript-based typing/loading dots animation that mimics ChatGPT-style real-time loading dots.
+Simple Typing Dots Animation (JS Controlled)
+1️⃣ In your appendLoading() function:
+
+Replace:
+
+appendLoading('<span class="loading">...</span>', 'ai', loadingBubbleId);
+
+With:
+
+appendLoading('<span class="loading-dots" id="dots-' + loadingBubbleId + '"></span>', 'ai', loadingBubbleId);
+startDotsAnimation('dots-' + loadingBubbleId);
+
+2️⃣ Create the startDotsAnimation function
+
+const dotsIntervals = {};
+
+function startDotsAnimation(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+
+    let dots = '';
+    const interval = setInterval(() => {
+        dots = dots.length < 3 ? dots + '.' : '';
+        el.textContent = dots;
+    }, 500);
+
+    dotsIntervals[elementId] = interval;
+}
+
+3️⃣ Stop the animation when the response comes
+
+In your sendPrompt(), after setting the final response:
+
+// Stop dots animation
+stopDotsAnimation('dots-' + loadingBubbleId);
+
+4️⃣ Create stopDotsAnimation
+
+function stopDotsAnimation(elementId) {
+    if (dotsIntervals[elementId]) {
+        clearInterval(dotsIntervals[elementId]);
+        delete dotsIntervals[elementId];
+    }
+}
+
+Why this works
+Feature	How it works
+Animated dots	JS setInterval cycles .
+Stop when response comes	Call stopDotsAnimation()
+Multiple loaders support	Uses elementId per prompt
+Summary
+
+    ✅ Looks like ChatGPT’s “...” dots animation
+
+    ✅ Fully JS controlled (no CSS content issues)
+
+    ✅ Works with multiple simultaneous messages
+
+    ✅ Easy to manage and stop cleanly
